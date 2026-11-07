@@ -1,0 +1,48 @@
+{
+  "name": "rotomolding-mpm",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "description": "WebGPU MPM Rotomolding Simulation",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "desktop": "npm run build && electron .",
+    "cli": "npm run build && electron . --cli",
+    "build:cli": "dotnet publish electron/cli/RotomoldingSimulation.Cli.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o release",
+    "dist:win": "npm run build && electron-builder --win portable && npm run build:cli"
+  },
+  "devDependencies": {
+    "electron": "^35.1.4",
+    "electron-builder": "^26.0.12",
+    "vite": "^5.4.0"
+  },
+  "dependencies": {
+    "@loumalouomega/mmg-wasm": "^0.1.0",
+    "opencascade.js": "^2.0.0-beta.b5ff984"
+  },
+  "build": {
+    "appId": "com.rotomolding.simulation",
+    "productName": "RotomoldingSimulation",
+    "artifactName": "RotomoldingSimulation-${version}-${arch}.${ext}",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>滚塑工艺仿真 - GPU 颗粒流动</title>
+  <link rel="stylesheet" href="./src/styles.css">
+  <link rel="preload" href="./opencascade.full.wasm?v=20260610" as="fetch" type="application/wasm" crossorigin>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <canvas id="viewCube" width="112" height="112" aria-label="视图导航块"></canvas>
+
+  <div id="panel">
+    <h2>滚塑仿真 · GPU 颗粒流动</h2>
+
+    <div id="gpuPreferenceSection" class="section" hidden>
+      <label for="gpuPreference">计算设备</label>
+      <select id="gpuPreference"></select>
+      <p id="gpuPreferenceHint" class="gpu-preference-hint"></p>
+      <p id="gpuActiveAdapter" class="gpu-preference-hint"></p>
+      <button id="btnApplyGpuPreference" type="button">应用并重启</button>
+    </div>
+
+    <!-- 模具加载 -->
+    <div class="section">
+      <label>模具文件 (.step/.stp)</label>
+      <input type="file" id="fileInput" accept=".step,.stp">
+      <button id="btnDefault">使用默认模具</button>
+    </div>
+
+    <div class="section">
+      <label>批量 STEP 文件</label>
+      <input type="file" id="batchFileInput" accept=".step,.stp" multiple>
+      <button id="btnBatchStart">批量仿真</button>
+    </div>
+
+    <div class="section">
+      <label>三角单元尺寸: <span id="meshSizeLabel">0.020</span></label>
+      <input type="range" id="meshSize" min="0.002" max="0.030" step="0.001" value="0.020">
+      <button id="btnRemesh" disabled>按当前尺寸重新划分</button>
+    </div>
+
+    <!-- 旋转参数 -->
+    <div class="section">
+      <label>主轴转速 (Y): <span id="rotationSpeedLabel">0.8</span> rad/s</label>
+      <input type="range" id="rotationSpeed" min="0.1" max="5.0" step="0.1" value="0.8">
+    </div>
+
+    <div class="section">
+      <label>副轴转速 (X): <span id="rotationSpeed2Label">0.3</span> rad/s</label>
+      <input type="range" id="rotationSpeed2" min="0.0" max="3.0" step="0.1" value="0.3">
+    </div>
+
+    <!-- 颗粒参数 -->
+    <div class="section">
+      <label>填充体积占比: <span id="volumeFractionLabel">20</span>%</label>
+      <input type="range" id="volumeFraction" min="5" max="95" step="1" value="20">
+    </div>
+
+    <div class="section">
+      <label>颗粒休止角: <span id="reposeAngleLabel">35</span>°</label>
+      <input type="range" id="reposeAngle" min="15" max="50" step="1" value="35">
+    </div>
+
+    <div class="section">
+      <label for="terminationCondition">仿真截至条件</label>
+      <select id="terminationCondition">
+        <option value="particles">颗粒用尽</option>
+        <option value="cycles">达到转轴周期数</option>
+      </select>
+      <label for="terminationCycles" id="terminationCyclesLabel">模具联合旋转周期数</label>
+      <input type="number" id="terminationCycles" min="1" max="100000" step="1" value="1">
+      <p class="gpu-preference-hint">1 个周期 = 主、副转轴共同旋转后，模具姿态第一次回到初始位置。</p>
+    </div>
+
+    <!-- 仿真控制 -->
+    <div class="section simulation-controls">
+      <button id="btnStart">开始仿真</button>
+      <button id="btnPause">暂停</button>
+      <button id="btnReset">重置</button>
+      <label class="toggle-row" for="showProcess">
+        <input type="checkbox" id="showProcess" checked>
+        <span>显示过程</span>
+      </label>
+    </div>
+
+    <!-- 结果导出 -->
+    <div class="section">
+      <button id="btnExportOBJ">导出上色模型 (OBJ)</button>
+    </div>
+
+    <div class="section">
+      <label class="toggle-row" for="showThicknessColors">
+        <input type="checkbox" id="showThicknessColors" checked>
+        <span>显示厚度颜色</span>
+      </label>
+    </div>
+
+    <!-- 实时统计 -->
+    <div id="stats">
+      <div>FPS: <span id="fps">0</span></div>
+      <div>体素网格: <span id="voxelGrid">100³ (1000000)</span></div>
+      <div>腔体体素: <span id="voxelCount">-</span></div>
+      <div>表面网格: <span id="gridRes">-</span></div>
+      <div>颗粒剩余: <span id="granuleRemaining">100.0%</span></div>
+      <div>剩余颗粒体积: <span id="granuleVolume">0.00000</span></div>
+      <div>累计沉积体积: <span id="depositedVolume">0.00000</span></div>
+      <div>最大壁厚: <span id="maxThickness">0.00000</span></div>
+    </div>
+
+    <div id="thicknessLegend">
+      <div class="legend-title">累计壁厚</div>
+      <div class="legend-bar"></div>
+      <div class="legend-labels"><span>薄</span><span>厚</span></div>
+    </div>
+
+    <div id="status">就绪 - 请加载 STEP 模型</div>
+  </div>
+
+  <div id="batchModal" class="batch-modal" hidden>
+    <section class="batch-dialog" role="dialog" aria-modal="true" aria-labelledby="batchTitle">
+      <div class="batch-heading">
+        <div>
+          <h3 id="batchTitle">批量仿真</h3>
+          <p id="batchSummary">正在准备任务...</p>
+        </div>
+        <button id="btnBatchClose" class="batch-close" type="button" aria-label="关闭批量仿真窗口">关闭</button>
+      </div>
+      <div class="batch-metrics">
+        <span>CPU <strong id="batchCpu">--</strong></span>
+        <span>GPU <strong id="batchGpu">--</strong></span>
+        <span>并行数 <strong id="batchParallelism">--</strong></span>
+      </div>
+      <p id="batchOutput" class="batch-output"></p>
+      <div id="batchJobList" class="batch-job-list" aria-live="polite"></div>
+      <div class="batch-actions">
+        <button id="btnBatchPause" type="button">暂停</button>
+        <button id="btnBatchResume" type="button">继续</button>
+      </div>
+    </section>
+  </div>
+
+  <!-- OpenCascade.js IIFE -->
+  <script src="./opencascade.full.js?v=20260610"></script>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
